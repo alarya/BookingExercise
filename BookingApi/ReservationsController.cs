@@ -1,44 +1,37 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Net;
-using System.Web;
 using System.Web.Http;
 
 namespace Ploeh.Samples.BookingApi
 {
     public class ReservationsController : ApiController
     {
-        private const int capacity = 10;
+        IReservationsRepository reservationsRepository;
+        ReservationProcessor reservationProcessor;
+
+        public ReservationsController(IReservationsRepository reservationsRepository,
+                                        ReservationProcessor reservationProcessor)
+        {
+            this.reservationsRepository = reservationsRepository;
+            this.reservationProcessor = reservationProcessor;
+        }
 
         public IHttpActionResult Post(ReservationRendition rendition)
         {
-            DateTimeOffset requestedDate;
-            if (!DateTimeOffset.TryParse(rendition.Date, out requestedDate))
+            if (!ReservationDate.IsValid(rendition.Date))
                 return this.BadRequest("Invalid date.");
-            
-            var min = requestedDate.Date;
-            var max = requestedDate.Date.AddDays(1);
+                        
+            var requestedDate = new ReservationDate(rendition.Date);
+            if (!reservationProcessor.IsFeasible(requestedDate, rendition.Quantity))
+                return this.StatusCode(HttpStatusCode.Forbidden);
 
-            using (var ctx = new ReservationsContext())
+            reservationsRepository.AddReservation(new Reservation
             {
-                var reservedSeats = (from r in ctx.Reservations
-                                     where min <= r.Date && r.Date < max
-                                     select r.Quantity)
-                                    .DefaultIfEmpty(0)
-                                    .Sum();
-                if (rendition.Quantity + reservedSeats > capacity)
-                    return this.StatusCode(HttpStatusCode.Forbidden);
-
-                ctx.Reservations.Add(new Reservation
-                {
-                    Date = requestedDate,
-                    Name = rendition.Name,
-                    Email = rendition.Email,
-                    Quantity = rendition.Quantity
-                });
-                ctx.SaveChanges();                
-            }
+                Date = requestedDate.Value,
+                Name = rendition.Name,
+                Email = rendition.Email,
+                Quantity = rendition.Quantity
+            });
 
             return this.Ok();
         }
